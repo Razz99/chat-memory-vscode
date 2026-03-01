@@ -1,0 +1,130 @@
+{
+  "name": "chat-memory-vscode",
+  "displayName": "Chat Memory",
+  "description": "VSCode extension to retrieve memorised Copilot chats.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "chat-memory",
+          "title": "Chat Memory",
+          "icon": "$(lightbulb-sparkle)"
+        }
+      ]
+    },
+    "views": {
+      "chat-memory": [
+        {
+          "id": "chatMemoryView",
+          "name": "Chat Memories"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "chatMemory.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "chatMemory.openEntry",
+        "title": "Open Entry"
+      },
+      {
+        "command": "chatMemory.deleteEntry",
+        "title": "Delete",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "chatMemory.refresh",
+          "when": "view == chatMemoryView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "chatMemory.deleteEntry",
+          "when": "view == chatMemoryView && viewItem == chatItem",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Chat Memory",
+      "properties": {
+        "chatMemory.host": {
+          "type": "string",
+          "default": "localhost",
+          "description": "PostgreSQL host"
+        },
+        "chatMemory.port": {
+          "type": "number",
+          "default": 3245,
+          "description": "PostgreSQL port"
+        },
+        "chatMemory.database": {
+          "type": "string",
+          "default": "chat_memory",
+          "description": "PostgreSQL database name"
+        },
+        "chatMemory.user": {
+          "type": "string",
+          "default": "user",
+          "description": "PostgreSQL user"
+        },
+        "chatMemory.password": {
+          "type": "string",
+          "default": "password",
+          "description": "PostgreSQL password"
+        },
+        "chatMemory.ssl": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable SSL for PostgreSQL connection (required for hosted databases like Neon, Supabase)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "yarn run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.10",
+    "@types/vscode": "^1.109.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.7.1",
+    "eslint": "^9.39.2",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0",
+    "webpack": "^5.104.1",
+    "webpack-cli": "^6.0.1"
+  },
+  "dependencies": {
+    "pg": "^8.13.3"
+  },
+  "packageManager": "yarn@4.0.0"
+}
