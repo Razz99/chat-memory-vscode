@@ -1,89 +1,180 @@
 import * as vscode from 'vscode';
-import { Pool, PoolConfig } from 'pg';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+// ---------------------------------------------------------------------------
+// Minimal type declarations for the Node built-in `node:sqlite` module.
+// `@types/node` v20 does not include these; they ship with Node >= 22.5.
+// ---------------------------------------------------------------------------
+interface StatementSync {
+  all(...params: unknown[]): unknown[];
+  get(...params: unknown[]): unknown;
+  run(...params: unknown[]): unknown;
+}
+
+interface DatabaseSync {
+  prepare(sql: string): StatementSync;
+  close(): void;
+}
+
+interface NodeSqliteModule {
+  DatabaseSync: new (filename: string) => DatabaseSync;
+}
+
+type DatabaseConstructor = NodeSqliteModule['DatabaseSync'];
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 export interface ChatMemoryEntry {
   readonly id: number;
   readonly project_name: string;
   readonly chat_title: string;
-  readonly created_at?: Date;
+  readonly created_at?: string | number | Date | null;
 }
 
-let pool: Pool | undefined;
-let output: vscode.OutputChannel | undefined;
+/** Shape of a raw row returned by SELECT queries. */
+interface MemoryRow {
+  id: number | string;
+  project_name: string;
+  chat_title: string;
+  created_at?: string | number | Date | null;
+}
+
+interface MemoryContentRow {
+  content?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Module-level state (underscore prefix signals intentionally mutable)
+// ---------------------------------------------------------------------------
+
+let _db: DatabaseSync | undefined;
+let _dbPath: string | undefined;
+let _output: vscode.OutputChannel | undefined;
+let _databaseSyncCtor: DatabaseConstructor | undefined;
+
+const DEFAULT_DB_DIR = '.chat-memory';
+const DEFAULT_DB_FILE = 'memories.db';
+
+const SQL_FETCH_ALL =
+  'SELECT id, project_name, chat_title, created_at FROM memories ORDER BY project_name ASC, created_at DESC';
+const SQL_FETCH_CONTENT = 'SELECT content FROM memories WHERE id = ?';
+const SQL_DELETE_ENTRY = 'DELETE FROM memories WHERE id = ?';
+
+// ---------------------------------------------------------------------------
+// Initialisation — called once from extension activate()
+// ---------------------------------------------------------------------------
 
 export function initDb(channel: vscode.OutputChannel): void {
-  output = channel;
+  _output = channel;
 }
 
-function getDbConfig(): PoolConfig {
-  const config = vscode.workspace.getConfiguration('chatMemory');
-  const ssl = config.get<boolean>('ssl', false);
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function log(message: string): void {
+  _output?.appendLine(`[Chat Memory] ${message}`);
+}
+
+function resolveDbPath(): string {
+  const env = process.env.CHAT_MEMORY_DB_PATH?.trim();
+  return env || path.join(os.homedir(), DEFAULT_DB_DIR, DEFAULT_DB_FILE);
+}
+
+function getDatabaseSyncConstructor(): DatabaseConstructor {
+  if (_databaseSyncCtor) {
+    return _databaseSyncCtor;
+  }
+
+  // `node:sqlite` is a Node built-in (>= 22.5) declared as a webpack external
+  // so it is never bundled and always resolved from the host runtime.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { DatabaseSync } = require('node:sqlite') as NodeSqliteModule;
+  _databaseSyncCtor = DatabaseSync;
+
+  return _databaseSyncCtor;
+}
+
+function toChatMemoryEntry(row: MemoryRow): ChatMemoryEntry {
   return {
-    host: config.get<string>('host', 'localhost'),
-    port: config.get<number>('port', 3245),
-    database: config.get<string>('database', 'chat_memory'),
-    user: config.get<string>('user', 'user'),
-    password: config.get<string>('password', 'password'),
-    ssl: ssl ? { rejectUnauthorized: false } : false,
-    connectionTimeoutMillis: 5000,
-    max: 5,
+    id: Number(row.id),
+    project_name: row.project_name,
+    chat_title: row.chat_title,
+    created_at: row.created_at,
   };
 }
 
-function getPool(): Pool {
-  if (!pool) {
-    const cfg = getDbConfig();
-    output?.appendLine(
-      `[Chat Memory] Connecting to ${cfg.host}:${cfg.port} db=${cfg.database} user=${cfg.user} ssl=${!!cfg.ssl}`
-    );
-    pool = new Pool(cfg);
-    pool.on('error', (err) => {
-      output?.appendLine(`[Chat Memory] Pool error: ${err.message}`);
-    });
+/**
+ * Opens (or returns the already-open) SQLite database.
+ * If the resolved path has changed since the last open the old connection is
+ * closed first.
+ */
+function getDb(): DatabaseSync {
+  const resolvedPath = resolveDbPath();
+
+  if (_db && _dbPath === resolvedPath) {
+    return _db;
   }
-  return pool;
+
+  // Path changed or first open — close the existing connection safely.
+  closeDbConnection();
+
+  fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+  const DatabaseSync = getDatabaseSyncConstructor();
+
+  log(`Opening SQLite DB at ${resolvedPath}`);
+  _db = new DatabaseSync(resolvedPath);
+  _dbPath = resolvedPath;
+
+  return _db;
 }
 
-export async function closePool(): Promise<void> {
-  const p = pool;
-  pool = undefined;
-  if (p) {
-    try {
-      await p.end();
-    } catch (err: unknown) {
-      output?.appendLine(
-        `[Chat Memory] Error closing pool: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
+/** Closes the current DB connection and clears cached state. */
+function closeDbConnection(): void {
+  const db = _db;
+  _db = undefined;
+  _dbPath = undefined;
+
+  if (!db) {
+    return;
+  }
+
+  try {
+    db.close();
+  } catch (err: unknown) {
+    log(`Error closing SQLite DB: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/** Force-closes the DB and clears the cached instance (e.g. on Refresh). */
 export function resetPool(): void {
-  const p = pool;
-  pool = undefined;
-  p?.end().catch((err: unknown) => {
-    output?.appendLine(
-      `[Chat Memory] Error closing old pool: ${err instanceof Error ? err.message : String(err)}`
-    );
-  });
+  closeDbConnection();
 }
 
-const FETCH_ALL_SQL =
-  'SELECT id, project_name, chat_title, created_at FROM memories ORDER BY project_name ASC, created_at DESC';
+/** Closes the DB on extension deactivation. */
+export async function closePool(): Promise<void> {
+  closeDbConnection();
+}
 
 export async function fetchAllEntries(): Promise<ChatMemoryEntry[]> {
-  const { rows } = await getPool().query<ChatMemoryEntry>(FETCH_ALL_SQL);
-  return rows;
+  const rows = getDb().prepare(SQL_FETCH_ALL).all() as MemoryRow[];
+  return rows.map(toChatMemoryEntry);
 }
 
 export async function fetchEntryContent(id: number): Promise<string | undefined> {
-  const { rows } = await getPool().query<{ content: string }>(
-    'SELECT content FROM memories WHERE id = $1',
-    [id]
-  );
-  return rows[0]?.content;
+  const row = getDb().prepare(SQL_FETCH_CONTENT).get(id) as MemoryContentRow | undefined;
+
+  return row?.content;
 }
 
 export async function deleteEntry(id: number): Promise<void> {
-  await getPool().query('DELETE FROM memories WHERE id = $1', [id]);
+  getDb().prepare(SQL_DELETE_ENTRY).run(id);
 }

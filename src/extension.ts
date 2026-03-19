@@ -10,6 +10,7 @@ class MemoryContentProvider implements vscode.TextDocumentContentProvider, vscod
 
   set(uri: vscode.Uri, content: string): void {
     this.store.set(uri.toString(), content);
+    this._onDidChange.fire(uri);
   }
 
   delete(uri: vscode.Uri): void {
@@ -40,13 +41,17 @@ export function activate(context: vscode.ExtensionContext) {
 
   const provider = new ChatMemoryProvider(output);
   const contentProvider = new MemoryContentProvider();
+
+  // Forward map: entry id → URI; reverse map: URI string → entry id.
   const openUris = new Map<number, vscode.Uri>();
+  const uriToId = new Map<string, number>();
 
   /** Remove a tracked entry and clean up its virtual document. */
   function removeTrackedEntry(id: number): void {
     const uri = openUris.get(id);
     if (uri) {
       openUris.delete(id);
+      uriToId.delete(uri.toString());
       contentProvider.delete(uri);
     }
   }
@@ -64,44 +69,40 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('chatMemory.openEntry', async (entry: ChatMemoryEntry) => {
-      const existingUri = openUris.get(entry.id);
-      if (existingUri) {
-        const doc = await vscode.workspace.openTextDocument(existingUri);
+      try {
+        const existingUri = openUris.get(entry.id);
+        if (existingUri) {
+          const doc = await vscode.workspace.openTextDocument(existingUri);
+          await vscode.window.showTextDocument(doc, { preview: false });
+          return;
+        }
+
+        const content = await fetchEntryContent(entry.id);
+        if (content === undefined) {
+          void vscode.window.showErrorMessage(`No content found for "${entry.chat_title}"`);
+          return;
+        }
+
+        const uri = buildUri(entry);
+        contentProvider.set(uri, content);
+        openUris.set(entry.id, uri);
+        uriToId.set(uri.toString(), entry.id);
+
+        const doc = await vscode.workspace.openTextDocument(uri);
         await vscode.window.showTextDocument(doc, { preview: false });
-        return;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        void vscode.window.showErrorMessage(`Failed to open entry "${entry.chat_title}": ${message}`);
       }
-
-      const content = await fetchEntryContent(entry.id);
-      if (content === undefined) {
-        vscode.window.showErrorMessage(`No content found for "${entry.chat_title}"`);
-        return;
-      }
-
-      const uri = buildUri(entry);
-      contentProvider.set(uri, content);
-      openUris.set(entry.id, uri);
-
-      const doc = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(doc, { preview: false });
     }),
 
     vscode.workspace.onDidCloseTextDocument((doc) => {
       if (doc.uri.scheme !== SCHEME) {
         return;
       }
-      const docStr = doc.uri.toString();
-      for (const [id, uri] of openUris) {
-        if (uri.toString() === docStr) {
-          removeTrackedEntry(id);
-          break;
-        }
-      }
-    }),
-
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('chatMemory')) {
-        resetPool();
-        provider.refresh();
+      const id = uriToId.get(doc.uri.toString());
+      if (id !== undefined) {
+        removeTrackedEntry(id);
       }
     }),
 
@@ -117,9 +118,14 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      await deleteEntry(entry.id);
-      removeTrackedEntry(entry.id);
-      provider.refresh();
+      try {
+        await deleteEntry(entry.id);
+        removeTrackedEntry(entry.id);
+        provider.refresh();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        void vscode.window.showErrorMessage(`Failed to delete "${entry.chat_title}": ${message}`);
+      }
     }),
   );
 }

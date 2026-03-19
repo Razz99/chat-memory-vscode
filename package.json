@@ -6,6 +6,10 @@
   "engines": {
     "vscode": "^1.109.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Razz99/chat-memory-vscode"
+  },
   "categories": [
     "Other"
   ],
@@ -60,41 +64,6 @@
           "group": "inline"
         }
       ]
-    },
-    "configuration": {
-      "title": "Chat Memory",
-      "properties": {
-        "chatMemory.host": {
-          "type": "string",
-          "default": "localhost",
-          "description": "PostgreSQL host"
-        },
-        "chatMemory.port": {
-          "type": "number",
-          "default": 3245,
-          "description": "PostgreSQL port"
-        },
-        "chatMemory.database": {
-          "type": "string",
-          "default": "chat_memory",
-          "description": "PostgreSQL database name"
-        },
-        "chatMemory.user": {
-          "type": "string",
-          "default": "user",
-          "description": "PostgreSQL user"
-        },
-        "chatMemory.password": {
-          "type": "string",
-          "default": "password",
-          "description": "PostgreSQL password"
-        },
-        "chatMemory.ssl": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable SSL for PostgreSQL connection (required for hosted databases like Neon, Supabase)"
-        }
-      }
     }
   },
   "scripts": {
@@ -102,8 +71,8 @@
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
-    "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out",
+    "compile-tests": "tsc -p tsconfig.test.json --outDir out",
+    "watch-tests": "tsc -p tsconfig.test.json -w --outDir out",
     "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
     "lint": "eslint src",
     "test": "vscode-test"
@@ -111,7 +80,6 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
-    "@types/pg": "^8.11.10",
     "@types/vscode": "^1.109.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
@@ -122,9 +90,6 @@
     "typescript-eslint": "^8.54.0",
     "webpack": "^5.104.1",
     "webpack-cli": "^6.0.1"
-  },
-  "dependencies": {
-    "pg": "^8.13.3"
   },
   "packageManager": "yarn@4.0.0"
 }

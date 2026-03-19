@@ -20,9 +20,11 @@ const extensionConfig = {
     libraryTarget: 'commonjs2'
   },
   externals: {
-    vscode: 'commonjs vscode', // the vscode-module is created on-the-fly and must be excluded. Add other modules that cannot be webpack'ed, 📖 -> https://webpack.js.org/configuration/externals/
-    // modules added here also need to be added in the .vscodeignore file
-    'pg-native': 'commonjs pg-native' // optional native addon for pg - exclude from bundle
+    // VS Code API — provided by the extension host at runtime, never bundle.
+    vscode: 'commonjs vscode',
+    // Node built-in SQLite module (Node >= 22.5) — must NOT be bundled or the
+    // native binding will fail to load in the extension host process.
+    'node:sqlite': 'commonjs node:sqlite',
   },
   resolve: {
     // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader

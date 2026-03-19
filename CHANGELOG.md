@@ -6,4 +6,5 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-- Initial release
+- Migrated database layer from PostgreSQL to Node built-in SQLite (`node:sqlite`).
+- DB file path now resolves from `CHAT_MEMORY_DB_PATH` or `$HOME/.chat-memory/memories.db`.
